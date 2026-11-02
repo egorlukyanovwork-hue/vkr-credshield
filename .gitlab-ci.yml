@@ -1,0 +1,44 @@
+stages: [test, scan, build, package, deploy]
+
+default:
+  image: python:3.11-slim
+
+unit-tests:
+  stage: test
+  script:
+    - python -m unittest discover -s tests -t . -v
+
+secret-scan:
+  stage: scan
+  script:
+    - python -m credshield.scancheck .          # код возврата 1 — сборка прекращается
+
+image-build:
+  stage: build
+  image: docker:29
+  services: [docker:29-dind]
+  script:
+    - docker build -t "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" .
+    - docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+chart-package:
+  stage: package
+  image: alpine/helm:4.3.1
+  script:
+    - helm lint chart
+    - helm package chart --app-version "$CI_COMMIT_SHORT_SHA"
+  artifacts:
+    paths: ["credshield-*.tgz"]
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+deploy-stand:
+  stage: deploy
+  image: alpine/helm:4.3.1
+  script:
+    - helm upgrade --install cs credshield-*.tgz -n credshield --create-namespace --set image.app="$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+  when: manual
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
