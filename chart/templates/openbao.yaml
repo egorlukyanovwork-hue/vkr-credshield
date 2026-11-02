@@ -1,0 +1,77 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: openbao}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: {{ .Release.Namespace }}-openbao-tokenreview}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: "system:auth-delegator"}
+subjects: [{kind: ServiceAccount, name: openbao, namespace: {{ .Release.Namespace }}}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: openbao}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: openbao}}
+  template:
+    metadata: {labels: {app: openbao}}
+    spec:
+      serviceAccountName: openbao
+      containers:
+        - name: openbao
+          image: {{ .Values.image.openbao }}
+          imagePullPolicy: IfNotPresent
+          args: [server, -dev, "-dev-listen-address=0.0.0.0:8200", "-config=/config/audit.hcl"]
+          env:
+            - name: BAO_DEV_ROOT_TOKEN_ID
+              valueFrom: {secretKeyRef: {name: bao-root, key: token}}
+          ports: [{containerPort: 8200}]
+          volumeMounts:
+            - {name: audit, mountPath: /audit}
+            - {name: config, mountPath: /config, readOnly: true}
+          readinessProbe: {httpGet: {path: /v1/sys/health, port: 8200}, periodSeconds: 3}
+        - name: responder
+          image: {{ .Values.image.app }}
+          imagePullPolicy: IfNotPresent
+          args: [credshield.responder]
+          securityContext: {runAsUser: 100, runAsGroup: 1000}   # владелец файла журнала аудита
+          ports: [{name: metrics-resp, containerPort: 9101}]
+          env:
+            - {name: METRICS_PORT, value: "9101"}
+            - {name: VAULT_ADDR, value: "http://127.0.0.1:8200"}
+            - {name: AUDIT_LOG, value: /audit/audit.log}
+            - {name: ADMIN_TOKEN_FILE, value: /responder/token}
+            - {name: WINDOW, value: "{{ .Values.responder.window }}"}
+            - {name: MAX_DENIALS, value: "{{ .Values.responder.maxDenials }}"}
+            - {name: MAX_ISSUES, value: "{{ .Values.responder.maxIssues }}"}
+            - {name: ROLE_LIMITS, value: {{ toJson .Values.responder.limits | quote }}}
+            - name: ROLE_PROFILE
+              value: {{ $m := dict }}{{ range concat .Values.roles .Values.extraRoles }}{{ $_ := set $m . (list (printf "database/creds/%s" .)) }}{{ end }}{{ toJson $m | quote }}
+          volumeMounts:
+            - {name: audit, mountPath: /audit, readOnly: true}
+            - {name: responder-token, mountPath: /responder, readOnly: true}
+      volumes:
+        - {name: audit, emptyDir: {}}
+        - name: config
+          configMap: {name: openbao-config}
+        - name: responder-token
+          secret: {secretName: responder-token, optional: true}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: openbao}
+spec:
+  selector: {app: openbao}
+  ports: [{port: 8200}]
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: openbao-config}
+data:
+  audit.hcl: |
+    audit "file" "to_file" {
+      options {
+        file_path = "/audit/audit.log"
+      }
+    }

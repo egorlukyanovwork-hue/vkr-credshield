@@ -1,0 +1,6 @@
+{{- range .Values.extraRoles }}
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: {{ . }}}
+---
+{{- end }}

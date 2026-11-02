@@ -1,0 +1,65 @@
+{{- range .Values.roles }}
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: {{ . }}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: {{ . }}}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: {{ . }}}}
+  template:
+    metadata: {labels: {app: {{ . }}}}
+    spec:
+      serviceAccountName: {{ . }}
+      securityContext: {fsGroup: 10001}
+      initContainers:
+        - name: credentials-init
+          image: {{ $.Values.image.app }}
+          imagePullPolicy: IfNotPresent
+          args: [credshield.agent, --once]
+          env:
+            - {name: VAULT_ADDR, value: "http://openbao:8200"}
+            - {name: CRED_ROLE, value: {{ . }}}
+            - {name: JWT_PATH, value: /var/run/secrets/tokens/vault-token}
+            - {name: OUT_PATH, value: /run/credentials/db.json}
+          volumeMounts:
+            - {name: credentials, mountPath: /run/credentials}
+            - {name: vault-token, mountPath: /var/run/secrets/tokens, readOnly: true}
+      containers:
+        - name: credentials-agent
+          image: {{ $.Values.image.app }}
+          imagePullPolicy: IfNotPresent
+          args: [credshield.agent]
+          ports: [{name: metrics-agent, containerPort: 9100}]
+          env:
+            - {name: METRICS_PORT, value: "9100"}
+            - {name: VAULT_ADDR, value: "http://openbao:8200"}
+            - {name: CRED_ROLE, value: {{ . }}}
+            - {name: JWT_PATH, value: /var/run/secrets/tokens/vault-token}
+            - {name: OUT_PATH, value: /run/credentials/db.json}
+          volumeMounts:
+            - {name: credentials, mountPath: /run/credentials}
+            - {name: vault-token, mountPath: /var/run/secrets/tokens, readOnly: true}
+        - name: service
+          image: {{ $.Values.image.app }}
+          imagePullPolicy: IfNotPresent
+          args: [credshield.demoapp]
+          ports: [{name: metrics-app, containerPort: 9102}]
+          env:
+            - {name: METRICS_PORT, value: "9102"}
+            - {name: SERVICE, value: {{ . }}}
+            - {name: DB_HOST, value: postgres}
+            - {name: DB_NAME, value: orders}
+          volumeMounts:
+            - {name: credentials, mountPath: /run/credentials, readOnly: true}
+      volumes:
+        - name: credentials
+          emptyDir: {medium: Memory}
+        - name: vault-token
+          projected:
+            sources:
+              - serviceAccountToken: {path: vault-token, audience: {{ $.Values.audience }}, expirationSeconds: 600}
+---
+{{- end }}

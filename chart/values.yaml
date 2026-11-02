@@ -1,0 +1,20 @@
+image:
+  app: credshield:0.1.0          # агент доставки, сервис реагирования, демонстрационный микросервис
+  openbao: openbao/openbao:2.7.2
+  postgres: postgres:17.11
+  prometheus: prom/prometheus:v3.15.1
+  grafana: grafana/grafana:13.3.0
+monitoring:
+  enabled: true
+audience: openbao
+roles:                           # роль выдачи = имя сервисной учётной записи = имя роли в базе данных
+  - orders
+  - billing
+extraRoles:                      # роли без рабочей нагрузки: нагрузочный замер
+  - bench
+responder:
+  limits:
+    bench: {max_issues: 1000000, max_denials: 1000000}
+  window: 300
+  maxDenials: 5
+  maxIssues: 30

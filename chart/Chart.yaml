@@ -1,0 +1,5 @@
+apiVersion: v2
+name: credshield
+description: Прототип паттерна «Выдача учётных данных по удостоверению платформы»
+version: 0.1.0
+appVersion: "0.1.0"
