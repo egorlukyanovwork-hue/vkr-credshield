@@ -1,0 +1,37 @@
+# Имитация нарушителя: токен экземпляра orders используется для запроса учётных данных роли billing.
+apiVersion: batch/v1
+kind: Job
+metadata: {name: attack}
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: orders
+      containers:
+        - name: attacker
+          image: credshield:0.1.0
+          imagePullPolicy: IfNotPresent
+          command: [python, -c]
+          args:
+            - |
+              import json, time
+              from credshield.vaultapi import VaultApi, ApiError
+              api = VaultApi("http://openbao:8200")
+              jwt = open("/var/run/secrets/tokens/vault-token").read().strip()
+              tok = api.login("orders", jwt)
+              print(json.dumps({"ts": round(time.time(), 3), "event": "attack_start"}), flush=True)
+              for i in range(3):
+                  try:
+                      api.creds(tok, "billing")
+                      r = "granted"
+                  except ApiError as e:
+                      r = "denied %s" % e.status
+                  print(json.dumps({"ts": round(time.time(), 3), "event": "attempt", "n": i + 1, "result": r}), flush=True)
+                  time.sleep(1)
+          volumeMounts: [{name: vault-token, mountPath: /var/run/secrets/tokens, readOnly: true}]
+      volumes:
+        - name: vault-token
+          projected:
+            sources:
+              - serviceAccountToken: {path: vault-token, audience: openbao, expirationSeconds: 600}

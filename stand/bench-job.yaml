@@ -1,0 +1,30 @@
+# Нагрузочный замер: RATE запросов/с в течение SECONDS с; метрики на порту 9103 забирает Prometheus.
+apiVersion: batch/v1
+kind: Job
+metadata: {name: bench}
+spec:
+  backoffLimit: 0
+  template:
+    metadata: {labels: {app: bench}}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: bench
+      containers:
+        - name: bench
+          image: credshield:0.1.0
+          imagePullPolicy: IfNotPresent
+          args: [credshield.bench]
+          ports: [{name: metrics-bench, containerPort: 9103}]
+          env:
+            - {name: VAULT_ADDR, value: "http://openbao:8200"}
+            - {name: CRED_ROLE, value: bench}
+            - {name: RATE, value: "5"}
+            - {name: SECONDS, value: "60"}
+            - {name: LINGER, value: "12"}
+            - {name: METRICS_PORT, value: "9103"}
+          volumeMounts: [{name: vault-token, mountPath: /var/run/secrets/tokens, readOnly: true}]
+      volumes:
+        - name: vault-token
+          projected:
+            sources:
+              - serviceAccountToken: {path: vault-token, audience: openbao, expirationSeconds: 600}
